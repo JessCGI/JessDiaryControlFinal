@@ -43,12 +43,14 @@ export default function Dashboard() {
   }, []);
 
   const habitsPercentage = useMemo(() => {
-    const todayHabits = habitos.filter((h) => h.days[0]).length;
+    const todayHabits = habitos.filter((h) => h.days && h.days[0]).length;
     const totalHabits = habitos.length;
     return totalHabits > 0 ? Math.round((todayHabits / totalHabits) * 100) : 0;
   }, [habitos]);
 
-  const activeProjects = useMemo(() => projetos.filter((p) => p.progress < 100).length, [projetos]);
+  const pendingTasks = useMemo(() => tarefas.filter((t) => !t.completed).length, [tarefas]);
+
+  const activeProjects = useMemo(() => projetos.filter((p) => (p.progress || 0) < 100).length, [projetos]);
 
   const balanceFormatted = useMemo(() => {
     let balance = 0;
@@ -61,7 +63,7 @@ export default function Dashboard() {
   }, [transacoes]);
 
   const urgentTasks = useMemo(() => tarefas.filter((t) => !t.completed && t.priority === 'Urgente').slice(0, 2), [tarefas]);
-  const ongoingProjects = useMemo(() => projetos.filter((p) => p.progress < 100).slice(0, 2), [projetos]);
+  const ongoingProjects = useMemo(() => projetos.filter((p) => (p.progress || 0) < 100).slice(0, 2), [projetos]);
 
   return (
     <div className="relative flex h-auto min-h-screen w-full flex-col overflow-x-hidden">

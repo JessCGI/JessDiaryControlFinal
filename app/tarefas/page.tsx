@@ -155,8 +155,8 @@ export default function Tarefas() {
     if (!tarefa || !tarefa.subtasks) return;
 
     // Optimistic UI updates
-    const updatedSubtasks = tarefa.subtasks.map((s) => s.id === subtaskId ? { ...s, completed: !s.completed } : s);
-    setTarefas(tarefas.map((t) => t.id === tarefaId ? { ...t, subtasks: updatedSubtasks } : t));
+    const updatedSubtasks = (tarefa.subtasks as any[]).map((s: any) => s.id === subtaskId ? { ...s, completed: !s.completed } : s);
+    setTarefas(tarefas.map((t) => t.id === tarefaId ? { ...t, subtasks: updatedSubtasks as any } : t));
 
     // DB Update
     await supabase.from('tarefas').update({ subtasks: updatedSubtasks as any }).eq('id', tarefaId);

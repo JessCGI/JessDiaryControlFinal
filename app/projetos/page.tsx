@@ -160,7 +160,7 @@ export default function Projetos() {
     if (newProgress === 100) newStatus = 'Entregue';
     else if (newProgress > 0 && newProgress < 100 && p.status === 'Briefing') newStatus = 'Produção';
 
-    setProjetos(projetos.map(proj => proj.id === projectId ? { ...proj, pipeline: updatedPipeline, progress: newProgress, status: newStatus } : proj));
+    setProjetos(projetos.map(proj => proj.id === projectId ? { ...proj, pipeline: updatedPipeline as any, progress: newProgress, status: newStatus as any } : proj));
 
     await supabase.from('projetos').update({
       pipeline: updatedPipeline as any,
