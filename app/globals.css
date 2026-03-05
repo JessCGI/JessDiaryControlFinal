@@ -1,0 +1,29 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@theme {
+  --color-background-light: #f6f7f7;
+  --color-background-dark: #0a0a0f;
+  --color-primary: #5e7ba6;
+  --color-primary-purple: #8b5cf6;
+  --color-primary-invest: #7b5ea7;
+  --color-card-dark: #111118;
+  --color-border-dark: #1f1f2e;
+  
+  --font-sans: var(--font-space), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-syne), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-mono), ui-monospace, SFMono-Regular, monospace;
+}
+
+body {
+  background-color: var(--color-background-dark);
+  color: #f1f5f9;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
