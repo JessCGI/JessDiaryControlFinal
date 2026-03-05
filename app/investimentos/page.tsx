@@ -1,14 +1,14 @@
 'use client';
 
-import { useState } from 'react';
-import { useLocalStorage } from '@/hooks/use-local-storage';
-import { TrendingUp, Plus, ArrowUpRight, ArrowDownRight, Trash2 } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { TrendingUp, Plus, ArrowUpRight, ArrowDownRight, Trash2, Loader2 } from 'lucide-react';
 import { Ativo } from '@/lib/types';
-import { generateId, parseCurrency, formatCurrency } from '@/lib/utils';
+import { parseCurrency, formatCurrency } from '@/lib/utils';
 import PageHeader from '@/components/PageHeader';
 import { Modal } from '@/components/modal';
 import { FormInput, FormSelect } from '@/components/FormInput';
 import EmptyState from '@/components/EmptyState';
+import { createClient } from '@/lib/supabase/client';
 
 const ATIVO_COLORS: Record<string, string> = {
   'blue': 'bg-blue-500',
@@ -27,9 +27,14 @@ const ATIVO_TEXT_COLORS: Record<string, string> = {
 };
 
 export default function Investimentos() {
-  const [ativos, setAtivos] = useLocalStorage<Ativo[]>('jess-investimentos', []);
+  const supabase = createClient();
+  const [ativos, setAtivos] = useState<Ativo[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [userId, setUserId] = useState<string | null>(null);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+
   const [newAtivo, setNewAtivo] = useState({
     ticker: '',
     type: 'Ação',
@@ -40,32 +45,64 @@ export default function Investimentos() {
     color: 'blue'
   });
 
-  const addAtivo = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newAtivo.ticker.trim()) return;
+  useEffect(() => {
+    async function fetchAtivos() {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setIsLoading(false);
+        return;
+      }
+      setUserId(user.id);
 
-    const ativo: Ativo = {
-      id: generateId(),
+      const { data } = await supabase
+        .from('ativos')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (data) {
+        setAtivos(data as Ativo[]);
+      }
+      setIsLoading(false);
+    }
+    fetchAtivos();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const addAtivo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newAtivo.ticker.trim() || !userId) return;
+    setIsSaving(true);
+
+    const ativoData = {
       ticker: newAtivo.ticker.toUpperCase(),
       type: newAtivo.type,
       allocation: parseInt(newAtivo.allocation) || 0,
       invested: newAtivo.invested,
       current: newAtivo.current,
       yield: newAtivo.yield,
-      color: newAtivo.color
+      color: newAtivo.color,
+      user_id: userId
     };
 
-    setAtivos([ativo, ...ativos]);
+    const { data } = await supabase.from('ativos').insert([ativoData]).select().single();
+    if (data) {
+      setAtivos([data as Ativo, ...ativos]);
+    }
+
     setIsModalOpen(false);
     setNewAtivo({ ticker: '', type: 'Ação', allocation: '0', invested: '', current: '', yield: '0', color: 'blue' });
+    setIsSaving(false);
   };
 
-  const deleteAtivo = (id: string) => {
-    setAtivos(ativos.filter((a) => a.id !== id));
+  const deleteAtivo = async (id: string) => {
+    if (confirm('Tem certeza que deseja excluir este ativo?')) {
+      setAtivos(ativos.filter((a) => a.id !== id));
+      await supabase.from('ativos').delete().eq('id', id);
+    }
   };
 
-  const totalInvestido = ativos.reduce((acc, a) => acc + parseCurrency(a.invested), 0);
-  const totalAtual = ativos.reduce((acc, a) => acc + parseCurrency(a.current), 0);
+  const totalInvestido = ativos.reduce((acc, a) => acc + parseCurrency(a.invested || '0'), 0);
+  const totalAtual = ativos.reduce((acc, a) => acc + parseCurrency(a.current || '0'), 0);
   const lucroTotal = totalAtual - totalInvestido;
   const rentabilidadeTotal = totalInvestido > 0 ? (lucroTotal / totalInvestido) * 100 : 0;
 
@@ -108,19 +145,24 @@ export default function Investimentos() {
       <main className="flex-1 px-6 space-y-4 pb-24 mt-4">
         <h3 className="text-slate-400 text-xs font-bold leading-tight tracking-widest uppercase mb-2">SUA CARTEIRA</h3>
 
-        {ativos.length === 0 ? (
+        {isLoading ? (
+          <div className="flex flex-col items-center justify-center py-20 text-slate-500">
+            <Loader2 className="animate-spin mb-2" size={24} />
+            <p className="font-mono text-sm uppercase tracking-widest">Carregando...</p>
+          </div>
+        ) : ativos.length === 0 ? (
           <EmptyState icon={<TrendingUp size={48} />} message="Nenhum ativo encontrado" />
         ) : (
           ativos.map((ativo) => {
-            const lucro = parseCurrency(ativo.current) - parseCurrency(ativo.invested);
-            const rentabilidade = parseCurrency(ativo.invested) > 0 ? (lucro / parseCurrency(ativo.invested)) * 100 : 0;
+            const lucro = parseCurrency(ativo.current || '0') - parseCurrency(ativo.invested || '0');
+            const rentabilidade = parseCurrency(ativo.invested || '0') > 0 ? (lucro / parseCurrency(ativo.invested || '0')) * 100 : 0;
 
             return (
               <div key={ativo.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl group">
                 <div className="flex justify-between items-start mb-4">
                   <div className="flex items-center gap-3">
-                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-white ${ATIVO_COLORS[ativo.color] || ATIVO_COLORS['blue']}`}>
-                      {ativo.ticker.substring(0, 2)}
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-white ${ATIVO_COLORS[ativo.color || 'blue'] || ATIVO_COLORS['blue']}`}>
+                      {ativo.ticker?.substring(0, 2)}
                     </div>
                     <div>
                       <h4 className="text-white font-bold">{ativo.ticker}</h4>
@@ -129,7 +171,7 @@ export default function Investimentos() {
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="text-right">
-                      <p className="text-white font-bold">{ativo.current}</p>
+                      <p className="text-white font-bold">{ativo.current || '0,00'}</p>
                       <div className={`flex items-center justify-end gap-1 text-[10px] font-bold ${lucro >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
                         {lucro >= 0 ? <ArrowUpRight size={10} /> : <ArrowDownRight size={10} />}
                         <span>{rentabilidade.toFixed(2)}%</span>
@@ -144,21 +186,21 @@ export default function Investimentos() {
                 <div className="space-y-2">
                   <div className="flex justify-between text-[10px] font-mono uppercase">
                     <span className="text-slate-500">Alocação Alvo</span>
-                    <span className="text-slate-300">{ativo.allocation}%</span>
+                    <span className="text-slate-300">{ativo.allocation || 0}%</span>
                   </div>
                   <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                    <div className={`h-full ${ATIVO_COLORS[ativo.color] || ATIVO_COLORS['blue']}`} style={{ width: `${ativo.allocation}%` }}></div>
+                    <div className={`h-full ${ATIVO_COLORS[ativo.color || 'blue'] || ATIVO_COLORS['blue']}`} style={{ width: `${ativo.allocation || 0}%` }}></div>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4 mt-4 pt-4 border-t border-slate-800">
                   <div>
                     <p className="text-slate-500 text-[10px] uppercase font-mono mb-1">Investido</p>
-                    <p className="text-slate-300 font-bold text-sm">{ativo.invested}</p>
+                    <p className="text-slate-300 font-bold text-sm">{ativo.invested || '0,00'}</p>
                   </div>
                   <div>
                     <p className="text-slate-500 text-[10px] uppercase font-mono mb-1">Yield Anual</p>
-                    <p className={`font-bold text-sm ${ATIVO_TEXT_COLORS[ativo.color] || ATIVO_TEXT_COLORS['blue']}`}>{ativo.yield}%</p>
+                    <p className={`font-bold text-sm ${ATIVO_TEXT_COLORS[ativo.color || 'blue'] || ATIVO_TEXT_COLORS['blue']}`}>{ativo.yield || '0'}%</p>
                   </div>
                 </div>
               </div>
@@ -235,8 +277,8 @@ export default function Investimentos() {
             </div>
           </div>
           <div className="pt-4">
-            <button type="submit" className="w-full bg-primary-purple hover:bg-primary-purple/90 text-white font-bold py-3 rounded-xl transition-colors">
-              Adicionar Ativo
+            <button disabled={isSaving} type="submit" className="w-full bg-primary-purple hover:bg-primary-purple/90 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition-colors">
+              {isSaving ? <Loader2 className="animate-spin text-white flex mx-auto" size={20} /> : 'Adicionar Ativo'}
             </button>
           </div>
         </form>

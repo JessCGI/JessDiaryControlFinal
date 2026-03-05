@@ -1,50 +1,92 @@
 'use client';
 
-import { useState, useCallback, useMemo } from 'react';
-import { useLocalStorage } from '@/hooks/use-local-storage';
-import { Check, Trash2, Plus } from 'lucide-react';
-import { generateId } from '@/lib/utils';
+import { useState, useCallback, useMemo, useEffect } from 'react';
+import { Check, Trash2, Plus, Loader2 } from 'lucide-react';
 import { Habito } from '@/lib/types';
 import PageHeader from '@/components/PageHeader';
 import { Modal } from '@/components/modal';
 import { FormInput, FormSelect } from '@/components/FormInput';
 import EmptyState from '@/components/EmptyState';
+import { createClient } from '@/lib/supabase/client';
 
 export default function Habitos() {
-  const [habitos, setHabitos] = useLocalStorage<Habito[]>('jess-habitos', []);
+  const supabase = createClient();
+  const [habitos, setHabitos] = useState<Habito[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [userId, setUserId] = useState<string | null>(null);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [newHabito, setNewHabito] = useState({ title: '', time: '08:00', frequency: 'Diário' });
 
-  const addHabito = useCallback((e: React.FormEvent) => {
+  useEffect(() => {
+    async function fetchHabitos() {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setIsLoading(false);
+        return;
+      }
+      setUserId(user.id);
+
+      const { data, error } = await supabase
+        .from('habitos')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (data) {
+        setHabitos(data as Habito[]);
+      }
+      setIsLoading(false);
+    }
+    fetchHabitos();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const addHabito = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newHabito.title.trim()) return;
-    const habito: Habito = {
-      id: generateId(),
+    if (!newHabito.title.trim() || !userId) return;
+    setIsSaving(true);
+
+    const habito = {
       title: newHabito.title,
       time: newHabito.time,
       frequency: newHabito.frequency,
-      days: [false, false, false, false, false, false, false]
+      days: [false, false, false, false, false, false, false],
+      streak: 0,
+      user_id: userId
     };
-    setHabitos(prev => [...prev, habito]);
+
+    const { data, error } = await supabase
+      .from('habitos')
+      .insert([habito])
+      .select()
+      .single();
+
+    if (data) {
+      setHabitos([data as Habito, ...habitos]);
+    }
+
     setNewHabito({ title: '', time: '08:00', frequency: 'Diário' });
     setIsModalOpen(false);
-  }, [newHabito, setHabitos]);
+    setIsSaving(false);
+  };
 
-  const deleteHabito = useCallback((id: string) => {
-    setHabitos(prev => prev.filter((h) => h.id !== id));
-  }, [setHabitos]);
+  const deleteHabito = async (id: string) => {
+    setHabitos(habitos.filter((h) => h.id !== id));
+    await supabase.from('habitos').delete().eq('id', id);
+  };
 
-  const toggleDay = useCallback((habitoId: string, dayIndex: number) => {
-    setHabitos(prev => prev.map((h) => {
-      if (h.id === habitoId) {
-        const newDays = [...h.days];
-        newDays[dayIndex] = !newDays[dayIndex];
-        return { ...h, days: newDays };
-      }
-      return h;
-    }));
-  }, [setHabitos]);
+  const toggleDay = async (habitoId: string, dayIndex: number) => {
+    const habito = habitos.find((h) => h.id === habitoId);
+    if (!habito || !habito.days) return;
+
+    const newDays = [...habito.days];
+    newDays[dayIndex] = !newDays[dayIndex];
+
+    setHabitos(habitos.map((h) => h.id === habitoId ? { ...h, days: newDays } : h));
+
+    await supabase.from('habitos').update({ days: newDays }).eq('id', habitoId);
+  };
 
   const habitosList = useMemo(() => habitos, [habitos]);
 
@@ -65,11 +107,16 @@ export default function Habitos() {
           </div>
 
           <div className="flex flex-col gap-4 mt-4">
-            {habitosList.length === 0 ? (
+            {isLoading ? (
+              <div className="flex flex-col items-center justify-center py-20 text-slate-500">
+                <Loader2 className="animate-spin mb-2" size={24} />
+                <p className="font-mono text-sm uppercase tracking-widest">Carregando...</p>
+              </div>
+            ) : habitosList.length === 0 ? (
               <EmptyState icon={<Plus size={48} />} message="Nenhum hábito encontrado" />
             ) : (
               habitosList.map((habito) => (
-                <div key={habito.id} className={`grid grid-cols-[1fr_repeat(7,28px)] gap-2 items-center p-3 rounded-xl bg-slate-900/50 border border-slate-800 ${habito.days.every((d) => !d) ? 'opacity-60' : ''}`}>
+                <div key={habito.id} className={`grid grid-cols-[1fr_repeat(7,28px)] gap-2 items-center p-3 rounded-xl bg-slate-900/50 border border-slate-800 ${(habito.days || []).every((d) => !d) ? 'opacity-60' : ''}`}>
                   <div className="flex flex-col min-w-0 pr-2">
                     <div className="flex items-center gap-2">
                       <span className="text-slate-100 font-semibold truncate">{habito.title}</span>
@@ -77,15 +124,15 @@ export default function Habitos() {
                     </div>
                     <span className="text-[10px] font-mono text-slate-400 mt-1 uppercase">{habito.time} • {habito.frequency}</span>
                   </div>
-                  {habito.days.map((completed, index) => (
+                  {(habito.days || [false, false, false, false, false, false, false]).map((completed, index) => (
                     <div
                       key={index}
                       onClick={() => toggleDay(habito.id, index)}
                       className={`w-7 h-7 rounded flex items-center justify-center cursor-pointer transition-all ${completed
-                          ? 'bg-primary-purple text-white'
-                          : index === 6
-                            ? 'bg-slate-800 border-2 border-primary-purple/50'
-                            : 'bg-slate-800 border border-slate-700 hover:border-slate-600'
+                        ? 'bg-primary-purple text-white'
+                        : index === 6
+                          ? 'bg-slate-800 border-2 border-primary-purple/50'
+                          : 'bg-slate-800 border border-slate-700 hover:border-slate-600'
                         }`}
                     >
                       {completed && <Check size={16} />}
@@ -134,8 +181,8 @@ export default function Habitos() {
             </FormSelect>
           </div>
           <div className="pt-4">
-            <button type="submit" className="w-full bg-primary hover:bg-primary/90 text-white font-bold py-3 rounded-xl transition-colors">
-              Salvar Hábito
+            <button disabled={isSaving} type="submit" className="w-full bg-primary hover:bg-primary/90 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition-colors">
+              {isSaving ? <Loader2 className="animate-spin text-white flex mx-auto" size={20} /> : 'Salvar Hábito'}
             </button>
           </div>
         </form>

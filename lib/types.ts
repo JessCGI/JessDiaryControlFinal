@@ -1,6 +1,10 @@
-export type Priority = 'Urgente' | 'Média' | 'Baixa' | 'Concluído';
+import { Database } from './database.types'
+
+export type Tables<T extends keyof Database['public']['Tables']> = Database['public']['Tables'][T]['Row']
+export type Enums<T extends keyof Database['public']['Enums']> = Database['public']['Enums'][T]
+
+// Re-export old types but map them to the DB where needed.
 export type ProjectStatus = 'Briefing' | 'Produção' | 'Revisão' | 'Entregue';
-export type TransactionType = 'income' | 'expense';
 
 export interface Subtask {
   id: string;
@@ -14,62 +18,10 @@ export interface PipelineStep {
   completed: boolean;
 }
 
-export interface Tarefa {
-  id: string;
-  title: string;
-  priority: Priority;
-  date: string;
-  tag: string;
-  completed: boolean;
-  color: string;
-  subtasks: Subtask[];
-}
-
-export interface Habito {
-  id: string;
-  title: string;
-  time: string;
-  frequency: string;
-  days: boolean[]; // 7 days of the week
-}
-
-export interface Projeto {
-  id: string;
-  title: string;
-  client: string;
-  budget: string;
-  progress: number;
-  status: ProjectStatus;
-  date: string;
-  image: string;
-  color: string;
-  pipeline?: PipelineStep[];
-}
-
-export interface Nota {
-  id: string;
-  title: string;
-  content: string;
-  date: string;
-  image: string | null;
-}
-
-export interface Ativo {
-  id: string;
-  ticker: string;
-  type: string;
-  allocation: number;
-  invested: string;
-  current: string;
-  yield: string;
-  color: string;
-}
-
-export interface Transacao {
-  id: string;
-  title: string;
-  category: string;
-  value: string;
-  type: TransactionType;
-  date: string;
-}
+export type Tarefa = Tables<'tarefas'> & { subtasks: Subtask[] | null }
+export type Projeto = Tables<'projetos'> & { pipeline: PipelineStep[] | null }
+export type Habito = Tables<'habitos'>
+export type Transacao = Tables<'transacoes'>
+export type Nota = Tables<'notas'>
+export type Ativo = Tables<'ativos'>
+export type Conta = Tables<'contas'>

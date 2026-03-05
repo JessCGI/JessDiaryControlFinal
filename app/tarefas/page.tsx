@@ -1,25 +1,50 @@
 'use client';
 
-import { useState, useCallback, useMemo } from 'react';
-import { useLocalStorage } from '@/hooks/use-local-storage';
-import { PlusCircle, Trash2, Check, X, Pencil, ChevronDown, ChevronUp, MinusCircle } from 'lucide-react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
+import { PlusCircle, Trash2, Check, X, Pencil, ChevronDown, ChevronUp, MinusCircle, Loader2 } from 'lucide-react';
 import { Tarefa, Subtask } from '@/lib/types';
-import { generateId } from '@/lib/utils';
-import { MOCK_TAREFAS } from '@/lib/mock-data';
 import { getColorClasses } from '@/utils/colors';
 import PageHeader from '@/components/PageHeader';
 import { Modal } from '@/components/modal';
 import { FormInput, FormSelect } from '@/components/FormInput';
+import { createClient } from '@/lib/supabase/client';
 
 export default function Tarefas() {
-  const [tarefasRaw, setTarefas] = useLocalStorage<Tarefa[]>('jess-tarefas', []);
-  const tarefas = tarefasRaw.length > 0 ? tarefasRaw : MOCK_TAREFAS;
+  const supabase = createClient();
+  const [tarefas, setTarefas] = useState<Tarefa[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [userId, setUserId] = useState<string | null>(null);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState('Todas');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
+
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    async function fetchTarefas() {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setIsLoading(false);
+        return;
+      }
+      setUserId(user.id);
+
+      const { data, error } = await supabase
+        .from('tarefas')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (data) {
+        setTarefas(data as Tarefa[]);
+      }
+      setIsLoading(false);
+    }
+    fetchTarefas();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const [formData, setFormData] = useState<{
     title: string;
@@ -35,9 +60,10 @@ export default function Tarefas() {
     subtasks: []
   });
 
-  const handleAddTarefa = useCallback((e: React.FormEvent) => {
+  const handleAddTarefa = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.title.trim()) return;
+    if (!formData.title.trim() || !userId) return;
+    setIsSaving(true);
 
     let color = 'blue';
     if (formData.priority === 'Urgente') color = 'red';
@@ -45,33 +71,59 @@ export default function Tarefas() {
     if (formData.priority === 'Baixa') color = 'emerald';
 
     if (editingId) {
-      setTarefas(tarefas.map((t) => t.id === editingId ? {
-        ...t,
-        ...formData,
-        color
-      } : t));
+      const { data, error } = await supabase
+        .from('tarefas')
+        .update({
+          title: formData.title,
+          priority: formData.priority,
+          date: formData.date,
+          tag: formData.tag,
+          subtasks: formData.subtasks as any,
+          color
+        })
+        .eq('id', editingId)
+        .select()
+        .single();
+
+      if (data) {
+        setTarefas(tarefas.map(t => t.id === editingId ? data as Tarefa : t));
+      }
     } else {
-      const newTarefa: Tarefa = {
-        id: generateId(),
-        ...formData,
+      const newTarefa = {
+        title: formData.title,
+        priority: formData.priority,
+        date: formData.date,
+        tag: formData.tag,
+        subtasks: formData.subtasks as any,
+        color,
         completed: false,
-        color
+        user_id: userId
       };
-      setTarefas([newTarefa, ...tarefas]);
+
+      const { data, error } = await supabase
+        .from('tarefas')
+        .insert([newTarefa])
+        .select()
+        .single();
+
+      if (data) {
+        setTarefas([data as Tarefa, ...tarefas]);
+      }
     }
 
     setIsModalOpen(false);
     setEditingId(null);
     setFormData({ title: '', priority: 'Média', date: '', tag: '', subtasks: [] });
-  }, [editingId, formData, setTarefas, tarefas]);
+    setIsSaving(false);
+  };
 
   const handleEdit = useCallback((tarefa: Tarefa) => {
     setEditingId(tarefa.id);
     setFormData({
       title: tarefa.title,
       priority: tarefa.priority,
-      date: tarefa.date,
-      tag: tarefa.tag,
+      date: tarefa.date || '',
+      tag: tarefa.tag || '',
       subtasks: tarefa.subtasks || []
     });
     setIsModalOpen(true);
@@ -80,7 +132,7 @@ export default function Tarefas() {
   const addSubtaskField = useCallback(() => {
     setFormData(prev => ({
       ...prev,
-      subtasks: [...prev.subtasks, { id: generateId(), title: '', completed: false }]
+      subtasks: [...prev.subtasks, { id: crypto.randomUUID(), title: '', completed: false }]
     }));
   }, []);
 
@@ -98,26 +150,34 @@ export default function Tarefas() {
     }));
   }, []);
 
-  const toggleSubtask = useCallback((tarefaId: string, subtaskId: string) => {
-    setTarefas(tarefas.map((t) => {
-      if (t.id === tarefaId) {
-        return {
-          ...t,
-          subtasks: t.subtasks.map((s) => s.id === subtaskId ? { ...s, completed: !s.completed } : s)
-        };
-      }
-      return t;
-    }));
-  }, [setTarefas, tarefas]);
+  const toggleSubtask = async (tarefaId: string, subtaskId: string) => {
+    const tarefa = tarefas.find(t => t.id === tarefaId);
+    if (!tarefa || !tarefa.subtasks) return;
 
-  const deleteTarefa = useCallback((id: string) => {
+    // Optimistic UI updates
+    const updatedSubtasks = tarefa.subtasks.map((s) => s.id === subtaskId ? { ...s, completed: !s.completed } : s);
+    setTarefas(tarefas.map((t) => t.id === tarefaId ? { ...t, subtasks: updatedSubtasks } : t));
+
+    // DB Update
+    await supabase.from('tarefas').update({ subtasks: updatedSubtasks as any }).eq('id', tarefaId);
+  };
+
+  const deleteTarefa = async (id: string) => {
     setTarefas(tarefas.filter((t) => t.id !== id));
     setConfirmDeleteId(null);
-  }, [setTarefas, tarefas]);
+    await supabase.from('tarefas').delete().eq('id', id);
+  };
 
-  const toggleTarefa = useCallback((id: string) => {
-    setTarefas(tarefas.map((t) => t.id === id ? { ...t, completed: !t.completed, priority: !t.completed ? 'Concluído' : 'Média' } : t));
-  }, [setTarefas, tarefas]);
+  const toggleTarefa = async (id: string) => {
+    const tarefa = tarefas.find(t => t.id === id);
+    if (!tarefa) return;
+
+    const newStatus = !tarefa.completed;
+    const newPriority = newStatus ? 'Concluído' : 'Média';
+
+    setTarefas(tarefas.map((t) => t.id === id ? { ...t, completed: newStatus, priority: newPriority } : t));
+    await supabase.from('tarefas').update({ completed: newStatus, priority: newPriority }).eq('id', id);
+  };
 
   const filteredTarefas = useMemo(() => {
     return tarefas.filter((t) => {
@@ -153,8 +213,8 @@ export default function Tarefas() {
             key={filter}
             onClick={() => setActiveFilter(filter)}
             className={`flex shrink-0 items-center justify-center px-5 py-2 rounded-full text-sm font-medium transition-colors ${activeFilter === filter
-                ? 'bg-primary-purple text-white'
-                : 'bg-slate-800 text-slate-400 border border-slate-700 hover:bg-slate-700'
+              ? 'bg-primary-purple text-white'
+              : 'bg-slate-800 text-slate-400 border border-slate-700 hover:bg-slate-700'
               }`}
           >
             {filter}
@@ -163,84 +223,90 @@ export default function Tarefas() {
       </nav>
 
       <main className="flex-1 px-6 space-y-4 pb-10">
-        {filteredTarefas.length === 0 && (
+        {isLoading ? (
+          <div className="flex flex-col items-center justify-center py-20 text-slate-500">
+            <Loader2 className="animate-spin mb-2" size={24} />
+            <p className="font-mono text-sm uppercase tracking-widest">Carregando...</p>
+          </div>
+        ) : filteredTarefas.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-slate-500">
             <p className="font-mono text-sm uppercase tracking-widest">Nenhuma tarefa encontrada</p>
           </div>
-        )}
-        {filteredTarefas.map((tarefa) => {
-          const colorClasses = getColorClasses(tarefa.color, 'text');
-          const borderClasses = getColorClasses(tarefa.color, 'border');
-          const bgAlphaClasses = getColorClasses(tarefa.color, 'bg');
+        ) : (
+          filteredTarefas.map((tarefa) => {
+            const colorClasses = getColorClasses(tarefa.color || 'blue', 'text');
+            const borderClasses = getColorClasses(tarefa.color || 'blue', 'border');
+            const bgAlphaClasses = getColorClasses(tarefa.color || 'blue', 'bg');
 
-          return (
-            <div key={tarefa.id} className="flex flex-col gap-2">
-              <div className={`bg-slate-900/${tarefa.completed ? '20' : '50'} border-l-4 ${tarefa.completed ? 'border-slate-700' : borderClasses} rounded-lg p-4 shadow-sm flex items-start gap-4 ${tarefa.completed ? 'opacity-60' : ''}`}>
-                <div className="pt-1">
-                  <div onClick={() => toggleTarefa(tarefa.id)} className={`w-6 h-6 ${tarefa.completed ? 'bg-primary-purple' : 'border-2 border-slate-600'} rounded-md flex items-center justify-center cursor-pointer`}>
-                    {tarefa.completed && <Check size={16} className="text-white" />}
+            return (
+              <div key={tarefa.id} className="flex flex-col gap-2">
+                <div className={`bg-slate-900/${tarefa.completed ? '20' : '50'} border-l-4 ${tarefa.completed ? 'border-slate-700' : borderClasses} rounded-lg p-4 shadow-sm flex items-start gap-4 ${tarefa.completed ? 'opacity-60' : ''}`}>
+                  <div className="pt-1">
+                    <div onClick={() => toggleTarefa(tarefa.id)} className={`w-6 h-6 ${tarefa.completed ? 'bg-primary-purple' : 'border-2 border-slate-600'} rounded-md flex items-center justify-center cursor-pointer`}>
+                      {tarefa.completed && <Check size={16} className="text-white" />}
+                    </div>
                   </div>
-                </div>
-                <div className="flex-1 cursor-pointer" onClick={() => setExpandedTaskId(expandedTaskId === tarefa.id ? null : tarefa.id)}>
+                  <div className="flex-1 cursor-pointer" onClick={() => setExpandedTaskId(expandedTaskId === tarefa.id ? null : tarefa.id)}>
+                    <div className="flex items-center gap-2">
+                      <h4 className={`font-bold text-slate-100 ${tarefa.completed ? 'line-through' : ''}`}>{tarefa.title}</h4>
+                      {tarefa.subtasks && tarefa.subtasks.length > 0 && (
+                        <span className="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded font-mono">
+                          {tarefa.subtasks.filter((s) => s.completed).length}/{tarefa.subtasks.length}
+                        </span>
+                      )}
+                      {tarefa.subtasks && tarefa.subtasks.length > 0 && (
+                        expandedTaskId === tarefa.id ? <ChevronUp size={14} className="text-slate-500" /> : <ChevronDown size={14} className="text-slate-500" />
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-2 mt-3">
+                      <span className={`font-mono text-[10px] px-2 py-0.5 rounded ${tarefa.completed ? 'bg-slate-800 text-slate-400 border-slate-700' : `${bgAlphaClasses} ${colorClasses} ${borderClasses}/20`} border uppercase font-bold`}>
+                        {tarefa.completed ? 'Concluído' : tarefa.priority}
+                      </span>
+                      {!tarefa.completed && tarefa.date && <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-primary/10 text-primary border border-primary/20">{tarefa.date}</span>}
+                      {!tarefa.completed && tarefa.tag && <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-primary-purple/10 text-primary-purple border border-primary-purple/20">{tarefa.tag}</span>}
+                    </div>
+                  </div>
+
                   <div className="flex items-center gap-2">
-                    <h4 className={`font-bold text-slate-100 ${tarefa.completed ? 'line-through' : ''}`}>{tarefa.title}</h4>
-                    {tarefa.subtasks && tarefa.subtasks.length > 0 && (
-                      <span className="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded font-mono">
-                        {tarefa.subtasks.filter((s) => s.completed).length}/{tarefa.subtasks.length}
-                      </span>
-                    )}
-                    {tarefa.subtasks && tarefa.subtasks.length > 0 && (
-                      expandedTaskId === tarefa.id ? <ChevronUp size={14} className="text-slate-500" /> : <ChevronDown size={14} className="text-slate-500" />
-                    )}
-                  </div>
-                  <div className="flex flex-wrap gap-2 mt-3">
-                    <span className={`font-mono text-[10px] px-2 py-0.5 rounded ${tarefa.completed ? 'bg-slate-800 text-slate-400 border-slate-700' : `${bgAlphaClasses} ${colorClasses} ${borderClasses}/20`} border uppercase font-bold`}>
-                      {tarefa.completed ? 'Concluído' : tarefa.priority}
-                    </span>
-                    {!tarefa.completed && tarefa.date && <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-primary/10 text-primary border border-primary/20">{tarefa.date}</span>}
-                    {!tarefa.completed && tarefa.tag && <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-primary-purple/10 text-primary-purple border border-primary-purple/20">{tarefa.tag}</span>}
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <button onClick={() => handleEdit(tarefa)} className="text-slate-400 hover:text-primary-purple transition-colors">
-                    <Pencil size={18} />
-                  </button>
-
-                  {confirmDeleteId === tarefa.id ? (
-                    <div className="flex items-center gap-1">
-                      <button onClick={() => deleteTarefa(tarefa.id)} className="bg-red-500 text-white text-[10px] px-2 py-1 rounded font-bold">Confirmar</button>
-                      <button onClick={() => setConfirmDeleteId(null)} className="text-slate-400 p-1"><X size={14} /></button>
-                    </div>
-                  ) : (
-                    <button onClick={() => setConfirmDeleteId(tarefa.id)} className="text-slate-400 hover:text-red-500 transition-colors">
-                      <Trash2 size={20} />
+                    <button onClick={() => handleEdit(tarefa)} className="text-slate-400 hover:text-primary-purple transition-colors">
+                      <Pencil size={18} />
                     </button>
-                  )}
-                </div>
-              </div>
 
-              {/* Subtasks Display */}
-              {expandedTaskId === tarefa.id && tarefa.subtasks && tarefa.subtasks.length > 0 && (
-                <div className="ml-10 space-y-2 pb-2">
-                  {tarefa.subtasks.map((subtask) => (
-                    <div key={subtask.id} className="flex items-center gap-3 bg-slate-900/30 p-2 rounded-md border border-slate-800/50">
-                      <div
-                        onClick={() => toggleSubtask(tarefa.id, subtask.id)}
-                        className={`w-4 h-4 ${subtask.completed ? 'bg-primary-purple' : 'border border-slate-600'} rounded flex items-center justify-center cursor-pointer`}
-                      >
-                        {subtask.completed && <Check size={10} className="text-white" />}
+                    {confirmDeleteId === tarefa.id ? (
+                      <div className="flex items-center gap-1">
+                        <button onClick={() => deleteTarefa(tarefa.id)} className="bg-red-500 text-white text-[10px] px-2 py-1 rounded font-bold">Confirmar</button>
+                        <button onClick={() => setConfirmDeleteId(null)} className="text-slate-400 p-1"><X size={14} /></button>
                       </div>
-                      <span className={`text-xs text-slate-300 ${subtask.completed ? 'line-through opacity-50' : ''}`}>
-                        {subtask.title}
-                      </span>
-                    </div>
-                  ))}
+                    ) : (
+                      <button onClick={() => setConfirmDeleteId(tarefa.id)} className="text-slate-400 hover:text-red-500 transition-colors">
+                        <Trash2 size={20} />
+                      </button>
+                    )}
+                  </div>
                 </div>
-              )}
-            </div>
-          );
-        })}
+
+                {/* Subtasks Display */}
+                {expandedTaskId === tarefa.id && tarefa.subtasks && tarefa.subtasks.length > 0 && (
+                  <div className="ml-10 space-y-2 pb-2">
+                    {tarefa.subtasks.map((subtask) => (
+                      <div key={subtask.id} className="flex items-center gap-3 bg-slate-900/30 p-2 rounded-md border border-slate-800/50">
+                        <div
+                          onClick={() => toggleSubtask(tarefa.id, subtask.id)}
+                          className={`w-4 h-4 ${subtask.completed ? 'bg-primary-purple' : 'border border-slate-600'} rounded flex items-center justify-center cursor-pointer`}
+                        >
+                          {subtask.completed && <Check size={10} className="text-white" />}
+                        </div>
+                        <span className={`text-xs text-slate-300 ${subtask.completed ? 'line-through opacity-50' : ''}`}>
+                          {subtask.title}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
       </main>
 
       {/* Modal Nova Tarefa */}
@@ -316,8 +382,8 @@ export default function Tarefas() {
             </div>
           </div>
 
-          <button type="submit" className="w-full bg-primary-purple hover:bg-primary-purple/90 text-white font-bold py-3 rounded-lg mt-4 transition-colors">
-            Salvar Tarefa
+          <button disabled={isSaving} type="submit" className="w-full bg-primary-purple hover:bg-primary-purple/90 disabled:opacity-50 text-white font-bold py-3 rounded-lg mt-4 transition-colors">
+            {isSaving ? <Loader2 className="animate-spin text-white flex mx-auto" size={20} /> : 'Salvar Tarefa'}
           </button>
         </form>
       </Modal>

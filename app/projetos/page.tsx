@@ -1,8 +1,7 @@
 'use client';
 
-import { useState, useCallback } from 'react';
-import { useLocalStorage } from '@/hooks/use-local-storage';
-import { Box, Plus, Calendar, CheckCircle, Trash2, Edit2, ListChecks } from 'lucide-react';
+import { useState, useCallback, useEffect } from 'react';
+import { Box, Plus, Calendar, CheckCircle, Trash2, Edit2, ListChecks, Loader2 } from 'lucide-react';
 import Image from 'next/image';
 import { Projeto, ProjectStatus, PipelineStep } from '@/lib/types';
 import { generateId } from '@/lib/utils';
@@ -10,6 +9,7 @@ import PageHeader from '@/components/PageHeader';
 import { Modal } from '@/components/modal';
 import { FormInput, FormSelect } from '@/components/FormInput';
 import EmptyState from '@/components/EmptyState';
+import { createClient } from '@/lib/supabase/client';
 
 const STATUS_COLORS: Record<string, string> = {
   'Briefing': 'bg-blue-500/20 text-blue-500 border-blue-500/30',
@@ -35,9 +35,13 @@ const PROGRESS_COLORS: Record<string, string> = {
 };
 
 export default function Projetos() {
-  const [projetos, setProjetos] = useLocalStorage<Projeto[]>('jess-projetos', []);
+  const supabase = createClient();
+  const [projetos, setProjetos] = useState<Projeto[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [userId, setUserId] = useState<string | null>(null);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const [newProjeto, setNewProjeto] = useState({
@@ -45,6 +49,29 @@ export default function Projetos() {
     progress: '0', date: '', color: 'blue', pipeline: [] as PipelineStep[]
   });
   const [newStepTitle, setNewStepTitle] = useState('');
+
+  useEffect(() => {
+    async function fetchProjetos() {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setIsLoading(false);
+        return;
+      }
+      setUserId(user.id);
+
+      const { data, error } = await supabase
+        .from('projetos')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (data) {
+        setProjetos(data as Projeto[]);
+      }
+      setIsLoading(false);
+    }
+    fetchProjetos();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const openNewModal = () => {
     setEditingId(null);
@@ -57,21 +84,22 @@ export default function Projetos() {
     setEditingId(projeto.id);
     setNewProjeto({
       title: projeto.title,
-      client: projeto.client,
-      budget: projeto.budget,
-      status: projeto.status,
-      progress: projeto.progress.toString(),
-      date: projeto.date,
-      color: projeto.color,
+      client: projeto.client || '',
+      budget: projeto.budget || '',
+      status: (projeto.status as ProjectStatus) || 'Briefing',
+      progress: (projeto.progress || 0).toString(),
+      date: projeto.date || '',
+      color: projeto.color || 'blue',
       pipeline: projeto.pipeline || []
     });
     setNewStepTitle('');
     setIsModalOpen(true);
   };
 
-  const saveProjeto = useCallback((e: React.FormEvent) => {
+  const saveProjeto = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newProjeto.title.trim()) return;
+    if (!newProjeto.title.trim() || !userId) return;
+    setIsSaving(true);
 
     // Auto calculate progress if there is a pipeline
     let finalProgress = parseInt(newProjeto.progress) || 0;
@@ -84,60 +112,68 @@ export default function Projetos() {
     let finalStatus = newProjeto.status;
     if (finalProgress === 100) finalStatus = 'Entregue';
 
-    const projetoData: Projeto = {
-      id: editingId || generateId(),
+    const projetoData = {
       title: newProjeto.title,
       client: newProjeto.client || 'Novo Cliente',
       budget: newProjeto.budget || 'R$ 0',
       progress: finalProgress,
       status: finalStatus,
       date: newProjeto.date || 'A definir',
-      image: editingId ? (projetos.find(p => p.id === editingId)?.image || `https://picsum.photos/seed/${generateId()}/600/400`) : `https://picsum.photos/seed/${generateId()}/600/400`,
+      image: editingId ? (projetos.find(p => p.id === editingId)?.image || `https://picsum.photos/seed/${crypto.randomUUID()}/600/400`) : `https://picsum.photos/seed/${crypto.randomUUID()}/600/400`,
       color: newProjeto.color,
-      pipeline: pipeline
+      pipeline: pipeline as any,
+      user_id: userId
     };
 
     if (editingId) {
-      setProjetos(prev => prev.map(p => p.id === editingId ? projetoData : p));
+      const { data } = await supabase.from('projetos').update(projetoData).eq('id', editingId).select().single();
+      if (data) setProjetos(projetos.map(p => p.id === editingId ? data as Projeto : p));
     } else {
-      setProjetos(prev => [projetoData, ...prev]);
+      const { data } = await supabase.from('projetos').insert([projetoData]).select().single();
+      if (data) setProjetos([data as Projeto, ...projetos]);
     }
 
     setIsModalOpen(false);
-  }, [newProjeto, editingId, projetos, setProjetos]);
+    setIsSaving(false);
+  };
 
-  const deleteProjeto = useCallback((id: string) => {
+  const deleteProjeto = async (id: string) => {
     if (confirm('Tem certeza que deseja excluir este projeto?')) {
-      setProjetos(prev => prev.filter((p) => p.id !== id));
+      setProjetos(projetos.filter((p) => p.id !== id));
+      await supabase.from('projetos').delete().eq('id', id);
     }
-  }, [setProjetos]);
+  };
 
-  const togglePipelineStep = useCallback((projectId: string, stepId: string) => {
-    setProjetos(prev => prev.map(p => {
-      if (p.id !== projectId) return p;
-      if (!p.pipeline) return p;
+  const togglePipelineStep = async (projectId: string, stepId: string) => {
+    const p = projetos.find(proj => proj.id === projectId);
+    if (!p || !p.pipeline) return;
 
-      const updatedPipeline = p.pipeline.map(step =>
-        step.id === stepId ? { ...step, completed: !step.completed } : step
-      );
+    const updatedPipeline = p.pipeline.map(step =>
+      step.id === stepId ? { ...step, completed: !step.completed } : step
+    );
 
-      const completedCount = updatedPipeline.filter(s => s.completed).length;
-      const totalCount = updatedPipeline.length;
-      const newProgress = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : p.progress;
+    const completedCount = updatedPipeline.filter(s => s.completed).length;
+    const totalCount = updatedPipeline.length;
+    const newProgress = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : (p.progress || 0);
 
-      let newStatus = p.status;
-      if (newProgress === 100) newStatus = 'Entregue';
-      else if (newProgress > 0 && newProgress < 100 && p.status === 'Briefing') newStatus = 'Produção';
+    let newStatus = p.status || 'Briefing';
+    if (newProgress === 100) newStatus = 'Entregue';
+    else if (newProgress > 0 && newProgress < 100 && p.status === 'Briefing') newStatus = 'Produção';
 
-      return { ...p, pipeline: updatedPipeline, progress: newProgress, status: newStatus };
-    }));
-  }, [setProjetos]);
+    setProjetos(projetos.map(proj => proj.id === projectId ? { ...proj, pipeline: updatedPipeline, progress: newProgress, status: newStatus } : proj));
+
+    await supabase.from('projetos').update({
+      pipeline: updatedPipeline as any,
+      progress: newProgress,
+      status: newStatus
+    }).eq('id', projectId);
+  };
 
   const addPipelineStepInModal = () => {
     if (!newStepTitle.trim()) return;
     setNewProjeto(prev => ({
       ...prev,
-      pipeline: [...(prev.pipeline || []), { id: generateId(), title: newStepTitle, completed: false }]
+      pipeline: [...(prev.pipeline || []), { id: crypto.randomUUID(), title: newStepTitle, completed: false }]
     }));
     setNewStepTitle('');
   };
@@ -166,7 +202,12 @@ export default function Projetos() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {projetos.length === 0 ? (
+          {isLoading ? (
+            <div className="col-span-full flex flex-col items-center justify-center py-20 text-slate-500">
+              <Loader2 className="animate-spin mb-2" size={24} />
+              <p className="font-mono text-sm uppercase tracking-widest">Carregando...</p>
+            </div>
+          ) : projetos.length === 0 ? (
             <div className="col-span-full">
               <EmptyState icon={<Box size={48} />} message="Nenhum projeto encontrado" />
             </div>
@@ -187,9 +228,9 @@ export default function Projetos() {
                 </button>
                 <div className="h-48 bg-slate-900 relative overflow-hidden shrink-0">
                   <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent z-10"></div>
-                  <Image src={projeto.image} alt={projeto.title} fill className="object-cover group-hover:scale-105 transition-transform duration-500" referrerPolicy="no-referrer" />
+                  {projeto.image && <Image src={projeto.image} alt={projeto.title} fill className="object-cover group-hover:scale-105 transition-transform duration-500" referrerPolicy="no-referrer" />}
                   <div className="absolute top-3 right-3 z-20 flex flex-col gap-2">
-                    <span className={`backdrop-blur-md px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider border ${STATUS_COLORS[projeto.status] || STATUS_COLORS['Briefing']} ${COLOR_VARIANTS[projeto.color] || ''}`}>
+                    <span className={`backdrop-blur-md px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider border ${STATUS_COLORS[projeto.status || 'Briefing']} ${COLOR_VARIANTS[projeto.color || 'blue']} `}>
                       {projeto.status}
                     </span>
                   </div>
@@ -244,7 +285,7 @@ export default function Projetos() {
                         <span className="text-xs font-bold text-slate-300">{projeto.progress}%</span>
                       </div>
                       <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                        <div className={`h-full ${PROGRESS_COLORS[projeto.color] || 'bg-primary-purple'} transition-all duration-500`} style={{ width: `${projeto.progress}%` }}></div>
+                        <div className={`h-full ${PROGRESS_COLORS[projeto.color || 'blue']} transition-all duration-500`} style={{ width: `${projeto.progress || 0}%` }}></div>
                       </div>
                     </div>
                   </div>
@@ -370,8 +411,8 @@ export default function Projetos() {
           </div>
 
           <div className="pt-4">
-            <button type="submit" className="w-full bg-primary hover:bg-primary/90 text-white font-bold py-3.5 rounded-xl transition-colors shadow-lg shadow-primary/20">
-              {editingId ? "Salvar Alterações" : "Criar Projeto"}
+            <button disabled={isSaving} type="submit" className="w-full bg-primary hover:bg-primary/90 disabled:opacity-50 text-white font-bold py-3.5 rounded-xl transition-colors shadow-lg shadow-primary/20">
+              {isSaving ? <Loader2 className="animate-spin text-white flex mx-auto" size={20} /> : (editingId ? "Salvar Alterações" : "Criar Projeto")}
             </button>
           </div>
         </form>

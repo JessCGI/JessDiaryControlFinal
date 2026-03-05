@@ -1,26 +1,46 @@
 'use client';
 
-import { useLocalStorage } from '@/hooks/use-local-storage';
+import { useState, useEffect, useMemo } from 'react';
 import { Bell, ListTodo, LineChart, Network, CircleDollarSign } from 'lucide-react';
 import Link from 'next/link';
 import { Tarefa, Habito, Projeto, Transacao } from '@/lib/types';
 import { parseCurrency, formatCurrency } from '@/lib/utils';
-import { MOCK_TAREFAS, MOCK_HABITOS, MOCK_PROJETOS, MOCK_FINANCEIRO } from '@/lib/mock-data';
-import { useMemo } from 'react';
 import PageHeader from '@/components/PageHeader';
+import { createClient } from '@/lib/supabase/client';
 
 export default function Dashboard() {
-  const [tarefasRaw] = useLocalStorage<Tarefa[]>('jess-tarefas', []);
-  const [habitosRaw] = useLocalStorage<Habito[]>('jess-habitos', []);
-  const [projetosRaw] = useLocalStorage<Projeto[]>('jess-projetos', []);
-  const [transacoesRaw] = useLocalStorage<Transacao[]>('jess-financeiro', []);
+  const supabase = createClient();
+  const [tarefas, setTarefas] = useState<Tarefa[]>([]);
+  const [habitos, setHabitos] = useState<Habito[]>([]);
+  const [projetos, setProjetos] = useState<Projeto[]>([]);
+  const [transacoes, setTransacoes] = useState<Transacao[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const tarefas = useMemo(() => tarefasRaw.length > 0 ? tarefasRaw : MOCK_TAREFAS, [tarefasRaw]);
-  const habitos = useMemo(() => habitosRaw.length > 0 ? habitosRaw : MOCK_HABITOS, [habitosRaw]);
-  const projetos = useMemo(() => projetosRaw.length > 0 ? projetosRaw : MOCK_PROJETOS, [projetosRaw]);
-  const transacoes = useMemo(() => transacoesRaw.length > 0 ? transacoesRaw : MOCK_FINANCEIRO, [transacoesRaw]);
+  useEffect(() => {
+    async function fetchDashboard() {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setIsLoading(false);
+        return;
+      }
 
-  const pendingTasks = useMemo(() => tarefas.filter((t) => !t.completed).length, [tarefas]);
+      const [resTarefas, resHabitos, resProjetos, resTransacoes] = await Promise.all([
+        supabase.from('tarefas').select('*'),
+        supabase.from('habitos').select('*'),
+        supabase.from('projetos').select('*'),
+        supabase.from('transacoes').select('*')
+      ]);
+
+      if (resTarefas.data) setTarefas(resTarefas.data as Tarefa[]);
+      if (resHabitos.data) setHabitos(resHabitos.data as Habito[]);
+      if (resProjetos.data) setProjetos(resProjetos.data as Projeto[]);
+      if (resTransacoes.data) setTransacoes(resTransacoes.data as Transacao[]);
+
+      setIsLoading(false);
+    }
+    fetchDashboard();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const habitsPercentage = useMemo(() => {
     const todayHabits = habitos.filter((h) => h.days[0]).length;
