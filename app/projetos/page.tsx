@@ -214,18 +214,6 @@ export default function Projetos() {
           ) : (
             projetos.map((projeto) => (
               <div key={projeto.id} className="bg-card-dark border border-slate-800 rounded-xl overflow-hidden flex flex-col hover:border-primary/50 transition-colors group relative">
-                <button
-                  onClick={(e) => { e.stopPropagation(); deleteProjeto(projeto.id); }}
-                  className="absolute top-3 left-3 z-30 p-2 bg-black/50 hover:bg-red-500/80 text-white rounded-full backdrop-blur-md transition-colors opacity-80 hover:opacity-100"
-                >
-                  <Trash2 size={16} />
-                </button>
-                <button
-                  onClick={(e) => { e.stopPropagation(); openEditModal(projeto); }}
-                  className="absolute top-3 left-12 z-30 p-2 bg-black/50 hover:bg-blue-500/80 text-white rounded-full backdrop-blur-md transition-colors opacity-80 hover:opacity-100"
-                >
-                  <Edit2 size={16} />
-                </button>
                 <div className="h-48 bg-slate-900 relative overflow-hidden shrink-0">
                   <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent z-10"></div>
                   {projeto.image && <Image src={projeto.image} alt={projeto.title} fill className="object-cover group-hover:scale-105 transition-transform duration-500" referrerPolicy="no-referrer" />}
@@ -278,7 +266,7 @@ export default function Projetos() {
                     </div>
                   )}
 
-                  <div className="mt-auto pt-2 border-t border-slate-800/30">
+                  <div className="mt-auto pt-4 border-t border-slate-800/30 flex flex-col gap-4">
                     <div className="space-y-1.5">
                       <div className="flex justify-between items-end">
                         <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Progresso</span>
@@ -287,6 +275,20 @@ export default function Projetos() {
                       <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
                         <div className={`h-full ${PROGRESS_COLORS[projeto.color || 'blue']} transition-all duration-500`} style={{ width: `${projeto.progress || 0}%` }}></div>
                       </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); openEditModal(projeto); }}
+                        className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg bg-blue-500/10 text-blue-500 hover:bg-blue-500/20 transition-colors text-xs font-bold uppercase tracking-wider"
+                      >
+                        <Edit2 size={14} /> Editar
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); deleteProjeto(projeto.id); }}
+                        className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20 transition-colors text-xs font-bold uppercase tracking-wider"
+                      >
+                        <Trash2 size={14} /> Excluir
+                      </button>
                     </div>
                   </div>
                 </div>

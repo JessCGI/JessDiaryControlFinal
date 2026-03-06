@@ -204,12 +204,12 @@ export default function Financeiro() {
                     </div>
                     <p className="text-xs font-bold text-slate-100">{conta.nome}</p>
                     <p className="text-sm font-mono font-bold text-primary">{conta.saldo}</p>
-                    <div className="absolute top-2 right-2 hidden group-hover:flex gap-1">
-                      <button onClick={(e) => handleEditConta(conta, e)} className="p-1 rounded bg-slate-700 hover:bg-slate-600 transition-colors">
-                        <Settings size={10} className="text-slate-300" />
+                    <div className="absolute top-2 right-2 flex opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity gap-1">
+                      <button onClick={(e) => handleEditConta(conta, e)} className="p-1.5 rounded bg-slate-700 hover:bg-slate-600 transition-colors">
+                        <Settings size={12} className="text-slate-200" />
                       </button>
-                      <button onClick={(e) => handleDeleteConta(conta.id, e)} className="p-1 rounded bg-red-900/50 hover:bg-red-800 transition-colors">
-                        <Trash2 size={10} className="text-red-400" />
+                      <button onClick={(e) => handleDeleteConta(conta.id, e)} className="p-1.5 rounded bg-red-900/50 hover:bg-red-800 transition-colors">
+                        <Trash2 size={12} className="text-red-400" />
                       </button>
                     </div>
                   </div>
@@ -263,12 +263,6 @@ export default function Financeiro() {
                 )}
                 {transacoes.map(transacao => (
                   <div key={transacao.id} className="flex items-center justify-between p-4 bg-primary/5 rounded-xl border border-primary/5 group relative">
-                    <button
-                      onClick={() => deleteTransacao(transacao.id)}
-                      className="absolute -left-2 -top-2 z-30 p-1.5 bg-black/50 hover:bg-red-500/80 text-white rounded-full backdrop-blur-md transition-colors opacity-0 group-hover:opacity-100"
-                    >
-                      <Trash2 size={14} />
-                    </button>
                     <div className="flex items-center gap-4">
                       <div className={`flex size-10 items-center justify-center rounded-full ${transacao.type === 'income' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'}`}>
                         {transacao.type === 'income' ? <ArrowUpRight size={20} /> : <ArrowDownLeft size={20} />}
@@ -278,7 +272,16 @@ export default function Financeiro() {
                         <p className="text-xs font-mono text-slate-400">{transacao.category} • {transacao.date}</p>
                       </div>
                     </div>
-                    <p className={`${transacao.type === 'income' ? 'text-emerald-500' : 'text-rose-500'} font-mono font-bold`}>{transacao.value}</p>
+                    <div className="flex items-center gap-3">
+                      <p className={`${transacao.type === 'income' ? 'text-emerald-500' : 'text-rose-500'} font-mono font-bold`}>{transacao.value}</p>
+                      <button
+                        onClick={() => deleteTransacao(transacao.id)}
+                        className="p-2 ml-1 text-slate-500 hover:text-red-500 hover:bg-red-500/10 rounded-full transition-colors opacity-100 md:opacity-0 group-hover:opacity-100"
+                        title="Excluir Transação"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
