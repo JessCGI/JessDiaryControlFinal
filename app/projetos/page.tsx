@@ -216,13 +216,13 @@ export default function Projetos() {
               <div key={projeto.id} className="bg-card-dark border border-slate-800 rounded-xl overflow-hidden flex flex-col hover:border-primary/50 transition-colors group relative">
                 <button
                   onClick={(e) => { e.stopPropagation(); deleteProjeto(projeto.id); }}
-                  className="absolute top-3 left-3 z-30 p-2 bg-black/50 hover:bg-red-500/80 text-white rounded-full backdrop-blur-md transition-colors opacity-0 group-hover:opacity-100"
+                  className="absolute top-3 left-3 z-30 p-2 bg-black/50 hover:bg-red-500/80 text-white rounded-full backdrop-blur-md transition-colors opacity-80 hover:opacity-100"
                 >
                   <Trash2 size={16} />
                 </button>
                 <button
                   onClick={(e) => { e.stopPropagation(); openEditModal(projeto); }}
-                  className="absolute top-3 left-12 z-30 p-2 bg-black/50 hover:bg-blue-500/80 text-white rounded-full backdrop-blur-md transition-colors opacity-0 group-hover:opacity-100"
+                  className="absolute top-3 left-12 z-30 p-2 bg-black/50 hover:bg-blue-500/80 text-white rounded-full backdrop-blur-md transition-colors opacity-80 hover:opacity-100"
                 >
                   <Edit2 size={16} />
                 </button>
